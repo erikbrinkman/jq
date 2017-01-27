@@ -2,8 +2,9 @@
 #include <ctype.h>
 #include <errno.h>
 #include <libgen.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -124,26 +125,25 @@ static int isoption(const char* text, char shortopt, const char* longopt, size_t
   return 0;
 }
 
-enum {
-  SLURP                 = 1,
-  RAW_INPUT             = 2,
-  PROVIDE_NULL          = 4,
-  RAW_OUTPUT            = 8,
-  ASCII_OUTPUT          = 32,
-  COLOR_OUTPUT          = 64,
-  NO_COLOR_OUTPUT       = 128,
-  SORTED_OUTPUT         = 256,
-  FROM_FILE             = 512,
-  RAW_NO_LF             = 1024,
-  UNBUFFERED_OUTPUT     = 2048,
-  EXIT_STATUS           = 4096,
-  EXIT_STATUS_EXACT     = 8192,
-  SEQ                   = 16384,
-  RUN_TESTS             = 32768,
+static struct {
+  bool slurp : 1;
+  bool raw_input : 1;
+  bool provide_null : 1;
+  bool raw_output : 1;
+  bool ascii_output : 1;
+  bool color_output : 1;
+  bool no_color_output : 1;
+  bool sorted_output : 1;
+  bool from_file : 1;
+  bool raw_no_lf : 1;
+  bool unbuffered_output : 1;
+  bool exit_status : 1;
+  bool exit_status_exact : 1;
+  bool seq : 1;
+  bool run_tests : 1;
   /* debugging only */
-  DUMP_DISASM           = 65536,
-};
-static int options = 0;
+  bool dump_disasm : 1;
+} options = {0};
 
 static const char *skip_shebang(const char *p) {
   if (strncmp(p, "#!", sizeof("#!") - 1) != 0)
@@ -165,7 +165,7 @@ static int process(jq_state *jq, jv value, int flags, int dumpopts) {
   jq_start(jq, value, flags);
   jv result;
   while (jv_is_valid(result = jq_next(jq))) {
-    if ((options & RAW_OUTPUT) && jv_get_kind(result) == JV_KIND_STRING) {
+    if ((options.raw_output) && jv_get_kind(result) == JV_KIND_STRING) {
       fwrite(jv_string_value(result), 1, jv_string_length_bytes(jv_copy(result)), stdout);
       ret = 0;
       jv_free(result);
@@ -174,18 +174,18 @@ static int process(jq_state *jq, jv value, int flags, int dumpopts) {
         ret = 11;
       else
         ret = 0;
-      if (options & SEQ)
+      if (options.seq)
         priv_fwrite("\036", 1, stdout, dumpopts & JV_PRINT_ISATTY);
       jv_dump(result, dumpopts);
     }
-    if (!(options & RAW_NO_LF))
+    if (!(options.raw_no_lf))
       priv_fwrite("\n", 1, stdout, dumpopts & JV_PRINT_ISATTY);
-    if (options & UNBUFFERED_OUTPUT)
+    if (options.unbuffered_output)
       fflush(stdout);
   }
   if (jq_halted(jq)) {
     // jq program invoked `halt` or `halt_error`
-    options |= EXIT_STATUS_EXACT;
+    options.exit_status_exact = true;
     jv exit_code = jq_get_exit_code(jq);
     if (!jv_is_valid(exit_code))
       ret = 0;
@@ -322,11 +322,11 @@ int main(int argc, char* argv[]) {
       }
 
       if (isoption(argv[i], 's', "slurp", &short_opts)) {
-        options |= SLURP;
+        options.slurp = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 'r', "raw-output", &short_opts)) {
-        options |= RAW_OUTPUT;
+        options.raw_output = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 'c', "compact-output", &short_opts)) {
@@ -334,39 +334,40 @@ int main(int argc, char* argv[]) {
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 'C', "color-output", &short_opts)) {
-        options |= COLOR_OUTPUT;
+        options.color_output = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 'M', "monochrome-output", &short_opts)) {
-        options |= NO_COLOR_OUTPUT;
+        options.no_color_output = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 'a', "ascii-output", &short_opts)) {
-        options |= ASCII_OUTPUT;
+        options.ascii_output = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 0, "unbuffered", &short_opts)) {
-        options |= UNBUFFERED_OUTPUT;
+        options.unbuffered_output = true;
         continue;
       }
       if (isoption(argv[i], 'S', "sort-keys", &short_opts)) {
-        options |= SORTED_OUTPUT;
+        options.sorted_output = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 'R', "raw-input", &short_opts)) {
-        options |= RAW_INPUT;
+        options.raw_input = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 'n', "null-input", &short_opts)) {
-        options |= PROVIDE_NULL;
+        options.provide_null = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 'f', "from-file", &short_opts)) {
-        options |= FROM_FILE;
+        options.from_file = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 'j', "join-output", &short_opts)) {
-        options |= RAW_OUTPUT | RAW_NO_LF;
+        options.raw_output = true;
+        options.raw_no_lf = true;
         if (!short_opts) continue;
       }
       if (isoption(argv[i], 0, "tab", &short_opts)) {
@@ -390,7 +391,7 @@ int main(int argc, char* argv[]) {
         continue;
       }
       if (isoption(argv[i], 0, "seq", &short_opts)) {
-        options |= SEQ;
+        options.seq = true;
         continue;
       }
       if (isoption(argv[i], 0, "stream", &short_opts)) {
@@ -402,7 +403,7 @@ int main(int argc, char* argv[]) {
         continue;
       }
       if (isoption(argv[i], 'e', "exit-status", &short_opts)) {
-        options |= EXIT_STATUS;
+        options.exit_status = true;
         if (!short_opts) continue;
       }
       // FIXME: For --arg* we should check that the varname is acceptable
@@ -472,7 +473,7 @@ int main(int argc, char* argv[]) {
         continue;
       }
       if (isoption(argv[i],  0,  "debug-dump-disasm", &short_opts)) {
-        options |= DUMP_DISASM;
+        options.dump_disasm = true;
         continue;
       }
       if (isoption(argv[i],  0,  "debug-trace=all", &short_opts)) {
@@ -497,7 +498,7 @@ int main(int argc, char* argv[]) {
         // XXX Pass program_arguments, even a whole jq_state *, through;
         // could be useful for testing
         ret = jq_testsuite(lib_search_paths,
-                           (options & DUMP_DISASM) || (jq_flags & JQ_DEBUG_TRACE),
+                           (options.dump_disasm) || (jq_flags & JQ_DEBUG_TRACE),
                            argc - i, argv + i);
         goto out;
       }
@@ -520,10 +521,10 @@ int main(int argc, char* argv[]) {
 #endif
   }
 #endif
-  if (options & SORTED_OUTPUT) dumpopts |= JV_PRINT_SORTED;
-  if (options & ASCII_OUTPUT) dumpopts |= JV_PRINT_ASCII;
-  if (options & COLOR_OUTPUT) dumpopts |= JV_PRINT_COLOR;
-  if (options & NO_COLOR_OUTPUT) dumpopts &= ~JV_PRINT_COLOR;
+  if (options.sorted_output) dumpopts |= JV_PRINT_SORTED;
+  if (options.ascii_output) dumpopts |= JV_PRINT_ASCII;
+  if (options.color_output) dumpopts |= JV_PRINT_COLOR;
+  if (options.no_color_output) dumpopts &= ~JV_PRINT_COLOR;
 
   if (getenv("JQ_COLORS") != NULL && !jq_set_colors(getenv("JQ_COLORS")))
       fprintf(stderr, "Failed to set $JQ_COLORS\n");
@@ -556,7 +557,7 @@ int main(int argc, char* argv[]) {
 
   if (!program) usage(2, 1);
 
-  if (options & FROM_FILE) {
+  if (options.from_file) {
     char *program_origin = strdup(program);
     if (program_origin == NULL) {
       perror("malloc");
@@ -590,18 +591,18 @@ int main(int argc, char* argv[]) {
     goto out;
   }
 
-  if (options & DUMP_DISASM) {
+  if (options.dump_disasm) {
     jq_dump_disassembly(jq, 0);
     printf("\n");
   }
 
-  if ((options & SEQ))
+  if ((options.seq))
     parser_flags |= JV_PARSE_SEQ;
 
-  if ((options & RAW_INPUT))
-    jq_util_input_set_parser(input_state, NULL, (options & SLURP) ? 1 : 0);
+  if ((options.raw_input))
+    jq_util_input_set_parser(input_state, NULL, (options.slurp) ? 1 : 0);
   else
-    jq_util_input_set_parser(input_state, jv_parser_new(parser_flags), (options & SLURP) ? 1 : 0);
+    jq_util_input_set_parser(input_state, jv_parser_new(parser_flags), (options.slurp) ? 1 : 0);
 
   // Let jq program read from inputs
   jq_set_input_cb(jq, jq_util_input_next_input_cb, input_state);
@@ -612,7 +613,7 @@ int main(int argc, char* argv[]) {
   if (nfiles == 0)
     jq_util_input_add_input(input_state, "-");
 
-  if (options & PROVIDE_NULL) {
+  if (options.provide_null) {
     ret = process(jq, jv_null(), jq_flags, dumpopts);
   } else {
     jv value;
@@ -625,7 +626,7 @@ int main(int argc, char* argv[]) {
 
       // Parse error
       jv msg = jv_invalid_get_msg(value);
-      if (!(options & SEQ)) {
+      if (!(options.seq)) {
         // --seq -> errors are not fatal
         ret = 4;
         fprintf(stderr, "parse error: %s\n", jv_string_value(msg));
@@ -651,9 +652,9 @@ out:
   jv_free(program_arguments);
   jq_util_input_free(&input_state);
   jq_teardown(&jq);
-  if (ret >= 10 && (options & EXIT_STATUS))
+  if (ret >= 10 && (options.exit_status))
     return ret - 10;
-  if (ret >= 10 && !(options & EXIT_STATUS_EXACT))
+  if (ret >= 10 && !options.exit_status_exact)
     return 0;
   return ret;
 }
